@@ -58,6 +58,16 @@ function authedApi(): Api {
   return new Api(undefined, undefined, 'test-token');
 }
 
+/** Convenience helper: return the URL string passed to the Nth mockSessionFetch call (0-indexed). */
+function callUrl(callIndex = 0): string {
+  return mockSessionFetch.mock.calls[callIndex][0] as string;
+}
+
+/** Convenience helper: return the URLSearchParams of the Nth mockSessionFetch call (0-indexed). */
+function callParams(callIndex = 0): URLSearchParams {
+  return new URL(callUrl(callIndex)).searchParams;
+}
+
 // ---------------------------------------------------------------------------
 // Global setup: clear mock state before every test and install safe defaults
 // ---------------------------------------------------------------------------
@@ -270,9 +280,8 @@ describe('Api.lookup', () => {
     mockSessionFetch.mockResolvedValueOnce(mockResponse(user));
     const result = await authedApi().lookup('realDonaldTrump');
     expect(result).toEqual(user);
-    const callUrl: string = mockSessionFetch.mock.calls[0][0];
-    expect(callUrl).toContain('/v1/accounts/lookup');
-    expect(new URL(callUrl).searchParams.get('acct')).toBe('realDonaldTrump');
+    expect(callUrl()).toContain('/v1/accounts/lookup');
+    expect(callParams().get('acct')).toBe('realDonaldTrump');
   });
 
   it('throws LoginErrorException when no credentials are provided', async () => {
@@ -337,15 +346,13 @@ describe('Api.search', () => {
     mockSessionFetch.mockResolvedValueOnce(mockResponse({ accounts: [], statuses: [], hashtags: [] }));
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for await (const _ of authedApi().search('accounts', 'q', 40, 4, 0, '0', undefined, '2025-01-01')) { /* drain */ }
-    const callUrl = mockSessionFetch.mock.calls[0][0] as string;
-    expect(new URL(callUrl).searchParams.get('min_id')).toBe(dateToBound('2025-01-01', 'start'));
+    expect(callParams().get('min_id')).toBe(dateToBound('2025-01-01', 'start'));
   });
 
   it('converts end_date to max_id using dateToBound', async () => {
     mockSessionFetch.mockResolvedValueOnce(mockResponse({ accounts: [], statuses: [], hashtags: [] }));
     for await (const _ of authedApi().search('accounts', 'q', 40, 4, 0, '0', undefined, undefined, '2025-01-31')) { /* drain */ }
-    const callUrl = mockSessionFetch.mock.calls[0][0] as string;
-    expect(new URL(callUrl).searchParams.get('max_id')).toBe(dateToBound('2025-01-31', 'end'));
+    expect(callParams().get('max_id')).toBe(dateToBound('2025-01-31', 'end'));
   });
 });
 
@@ -371,9 +378,8 @@ describe('Api.hashtag', () => {
   it('strips a leading # from the tag name', async () => {
     mockSessionFetch.mockResolvedValueOnce(mockResponse([]));
     for await (const _ of authedApi().hashtag('#maga', 100)) { /* drain */ }
-    const url: string = mockSessionFetch.mock.calls[0][0];
-    expect(url).toContain('/timelines/tag/maga');
-    expect(url).not.toContain('#');
+    expect(callUrl()).toContain('/timelines/tag/maga');
+    expect(callUrl()).not.toContain('#');
   });
 
   it('stops immediately when the response is empty', async () => {
@@ -396,14 +402,14 @@ describe('Api.trending', () => {
     mockSessionFetch.mockResolvedValueOnce(mockResponse(truths));
     const result = await authedApi().trending(10);
     expect(result).toEqual(truths);
-    expect(mockSessionFetch.mock.calls[0][0]).toContain('/truth/trending/truths');
-    expect(mockSessionFetch.mock.calls[0][0]).toContain('limit=10');
+    expect(callUrl()).toContain('/truth/trending/truths');
+    expect(callUrl()).toContain('limit=10');
   });
 
   it('defaults the limit to 10', async () => {
     mockSessionFetch.mockResolvedValueOnce(mockResponse([]));
     await authedApi().trending();
-    expect(mockSessionFetch.mock.calls[0][0]).toContain('limit=10');
+    expect(callUrl()).toContain('limit=10');
   });
 });
 
@@ -451,7 +457,7 @@ describe('Api.tags', () => {
     mockSessionFetch.mockResolvedValueOnce(mockResponse(tags));
     const result = await authedApi().tags();
     expect(result).toEqual(tags);
-    expect(mockSessionFetch.mock.calls[0][0]).toContain('/v1/trends');
+    expect(callUrl()).toContain('/v1/trends');
   });
 });
 
@@ -470,7 +476,7 @@ describe('Api.suggested', () => {
   it('passes maximum as the limit query param', async () => {
     mockSessionFetch.mockResolvedValueOnce(mockResponse([]));
     await authedApi().suggested(25);
-    expect(mockSessionFetch.mock.calls[0][0]).toContain('limit=25');
+    expect(callUrl()).toContain('limit=25');
   });
 });
 
@@ -484,9 +490,8 @@ describe('Api.trendingGroups', () => {
     mockSessionFetch.mockResolvedValueOnce(mockResponse(groups));
     const result = await authedApi().trendingGroups(10);
     expect(result).toEqual(groups);
-    const url: string = mockSessionFetch.mock.calls[0][0];
-    expect(url).toContain('/truth/trends/groups');
-    expect(url).toContain('limit=10');
+    expect(callUrl()).toContain('/truth/trends/groups');
+    expect(callUrl()).toContain('limit=10');
   });
 });
 
@@ -500,7 +505,7 @@ describe('Api.groupTags', () => {
     mockSessionFetch.mockResolvedValueOnce(mockResponse(tags));
     const result = await authedApi().groupTags();
     expect(result).toEqual(tags);
-    expect(mockSessionFetch.mock.calls[0][0]).toContain('/v1/groups/tags');
+    expect(callUrl()).toContain('/v1/groups/tags');
   });
 });
 
@@ -519,7 +524,7 @@ describe('Api.suggestedGroups', () => {
   it('passes maximum as the limit query param', async () => {
     mockSessionFetch.mockResolvedValueOnce(mockResponse([]));
     await authedApi().suggestedGroups(30);
-    expect(mockSessionFetch.mock.calls[0][0]).toContain('limit=30');
+    expect(callUrl()).toContain('limit=30');
   });
 });
 
@@ -538,13 +543,13 @@ describe('Api.ads', () => {
   it('defaults device to "desktop"', async () => {
     mockSessionFetch.mockResolvedValueOnce(mockResponse([]));
     await authedApi().ads();
-    expect(mockSessionFetch.mock.calls[0][0]).toContain('device=desktop');
+    expect(callUrl()).toContain('device=desktop');
   });
 
   it('passes a custom device parameter', async () => {
     mockSessionFetch.mockResolvedValueOnce(mockResponse([]));
     await authedApi().ads('mobile');
-    expect(mockSessionFetch.mock.calls[0][0]).toContain('device=mobile');
+    expect(callUrl()).toContain('device=mobile');
   });
 });
 
@@ -714,8 +719,7 @@ describe('Api.pullStatuses', () => {
       .mockResolvedValueOnce(mockResponse([]));
 
     for await (const _ of authedApi().pullStatuses('user', false)) { /* drain */ }
-    const url: string = mockSessionFetch.mock.calls[1][0];
-    expect(url).toContain('exclude_replies=true');
+    expect(callUrl(1)).toContain('exclude_replies=true');
   });
 
   it('builds the URL with pinned=true when pinned=true', async () => {
@@ -724,8 +728,7 @@ describe('Api.pullStatuses', () => {
       .mockResolvedValueOnce(mockResponse([]));
 
     for await (const _ of authedApi().pullStatuses('user', false, false, undefined, undefined, true)) { /* drain */ }
-    const url: string = mockSessionFetch.mock.calls[1][0];
-    expect(url).toContain('pinned=true');
+    expect(callUrl(1)).toContain('pinned=true');
   });
 });
 
@@ -749,8 +752,7 @@ describe('Api.userLikes', () => {
     mockSessionFetch.mockResolvedValueOnce(mockResponse([{ id: 'u1' }], {}));
 
     for await (const _ of authedApi().userLikes('https://truthsocial.com/post/99999')) { /* drain */ }
-    const url: string = mockSessionFetch.mock.calls[0][0];
-    expect(url).toContain('/statuses/99999/favourited_by');
+    expect(callUrl()).toContain('/statuses/99999/favourited_by');
   });
 
   it('respects the topNum limit', async () => {

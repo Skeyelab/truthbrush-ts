@@ -15,7 +15,8 @@ export const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 12_2_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';
 /** Browser profile used for TLS fingerprint impersonation (matches Python's `impersonate="chrome136"`). */
 export const BROWSER_PROFILE = 'chrome_136' as const;
-export const OS = 'windows' as const;
+/** OS emulated during TLS fingerprint impersonation. */
+export const BROWSER_OS = 'windows' as const;
 
 // OAuth client credentials from the Truth Social web app bundle
 const CLIENT_ID = '9X1Fdd-pxNsAgEDNi_SfhJWi8T-vLuV2WVzKIbkTCw4';
@@ -140,7 +141,7 @@ export class Api {
 
   private readonly username: string | undefined;
   private readonly password: string | undefined;
-  private _session: Session | null = null;
+  private session: Session | null = null;
 
   constructor(username?: string, password?: string, token?: string) {
     this.username = username ?? process.env.TRUTHSOCIAL_USERNAME;
@@ -161,14 +162,14 @@ export class Api {
   }
 
   private async getSession(): Promise<Session> {
-    if (!this._session) {
-      this._session = await createSession({
+    if (!this.session) {
+      this.session = await createSession({
         browser: BROWSER_PROFILE,
-        os: OS,
+        os: BROWSER_OS,
         proxy: getProxyUrl(),
       });
     }
-    return this._session;
+    return this.session;
   }
 
   private async checkRateLimit(headers: HeadersLike): Promise<void> {
@@ -257,7 +258,7 @@ export class Api {
       response = await wreqFetch(url, {
         method: 'POST',
         browser: BROWSER_PROFILE,
-        os: OS,
+        os: BROWSER_OS,
         proxy: getProxyUrl(),
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
