@@ -138,5 +138,5 @@ All methods that return paginated results are **async generators** that `yield` 
 
 ## Notes
 
-- This library uses `axios` for HTTP. Unlike the Python version (which uses `curl_cffi` to emulate browser TLS fingerprints for Cloudflare bypass), this TypeScript port does not perform TLS fingerprint impersonation. Authentication and most API calls still work, but Cloudflare may block some requests in certain environments.
+- This library uses [`wreq-js`](https://github.com/sqdshguy/wreq-js) (Rust-native TLS) for HTTP, impersonating **Chrome 136** — the same browser profile as the Python version's `curl_cffi` with `impersonate="chrome136"`. This means TLS fingerprints, HTTP/2 settings, and browser-specific headers all match what a real Chrome 136 client sends, which is what the Python version relies on to bypass Cloudflare.
 - Rate-limit headers (`x-ratelimit-*`) are read automatically; the client sleeps when the remaining quota drops to ≤ 50.

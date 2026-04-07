@@ -1,4 +1,5 @@
-import axios, { type AxiosProxyConfig } from 'axios';
+import { createSession, fetch as wreqFetch } from 'wreq-js';
+import type { Session } from 'wreq-js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -9,8 +10,12 @@ dotenv.config();
 
 export const BASE_URL = 'https://truthsocial.com';
 export const API_BASE_URL = 'https://truthsocial.com/api';
+/** Retained for backward compatibility; wreq-js sets the correct UA automatically. */
 export const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 12_2_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';
+/** Browser profile used for TLS fingerprint impersonation (matches Python's `impersonate="chrome136"`). */
+export const BROWSER_PROFILE = 'chrome_136' as const;
+export const OS = 'windows' as const;
 
 // OAuth client credentials from the Truth Social web app bundle
 const CLIENT_ID = '9X1Fdd-pxNsAgEDNi_SfhJWi8T-vLuV2WVzKIbkTCw4';
@@ -93,23 +98,34 @@ export function dateToBound(dtInput: string | Date, bound: 'start' | 'end'): str
   }
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
+/** Minimal interface for what we read from HTTP response headers. */
+interface HeadersLike {
+  get(name: string): string | null;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function buildProxyConfig(): AxiosProxyConfig | undefined {
-  const raw = process.env.https_proxy ?? process.env.HTTPS_PROXY ?? process.env.http_proxy ?? process.env.HTTP_PROXY;
-  if (!raw) return undefined;
-  try {
-    const url = new URL(raw);
-    return { host: url.hostname, port: url.port ? parseInt(url.port, 10) : 80 };
-  } catch {
-    return undefined;
+function getProxyUrl(): string | undefined {
+  return (
+    process.env.https_proxy ??
+    process.env.HTTPS_PROXY ??
+    process.env.http_proxy ??
+    process.env.HTTP_PROXY
+  );
+}
+
+/** Append query params to a full URL string. */
+function buildUrl(url: string, params?: Record<string, unknown>): string {
+  if (!params || Object.keys(params).length === 0) return url;
+  const parsed = new URL(url);
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== null && value !== undefined) {
+      parsed.searchParams.set(key, String(value));
+    }
   }
+  return parsed.toString();
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +140,7 @@ export class Api {
 
   private readonly username: string | undefined;
   private readonly password: string | undefined;
+  private _session: Session | null = null;
 
   constructor(username?: string, password?: string, token?: string) {
     this.username = username ?? process.env.TRUTHSOCIAL_USERNAME;
@@ -143,14 +160,25 @@ export class Api {
     }
   }
 
-  private async checkRateLimit(headers: Record<string, string>): Promise<void> {
-    const limit = headers['x-ratelimit-limit'];
-    const remaining = headers['x-ratelimit-remaining'];
-    const reset = headers['x-ratelimit-reset'];
+  private async getSession(): Promise<Session> {
+    if (!this._session) {
+      this._session = await createSession({
+        browser: BROWSER_PROFILE,
+        os: OS,
+        proxy: getProxyUrl(),
+      });
+    }
+    return this._session;
+  }
 
-    if (limit !== undefined) this.rateLimitMax = parseInt(limit, 10);
-    if (remaining !== undefined) this.rateLimitRemaining = parseInt(remaining, 10);
-    if (reset !== undefined) this.rateLimitReset = new Date(reset);
+  private async checkRateLimit(headers: HeadersLike): Promise<void> {
+    const limit = headers.get('x-ratelimit-limit');
+    const remaining = headers.get('x-ratelimit-remaining');
+    const reset = headers.get('x-ratelimit-reset');
+
+    if (limit !== null) this.rateLimitMax = parseInt(limit, 10);
+    if (remaining !== null) this.rateLimitRemaining = parseInt(remaining, 10);
+    if (reset !== null) this.rateLimitReset = new Date(reset);
 
     if (this.rateLimitRemaining !== null && this.rateLimitRemaining <= 50) {
       const now = Date.now();
@@ -163,42 +191,37 @@ export class Api {
     }
   }
 
-  private requestConfig(extraHeaders?: Record<string, string>) {
-    return {
-      headers: {
-        Authorization: `Bearer ${this.authId}`,
-        'User-Agent': USER_AGENT,
-        ...extraHeaders,
-      },
-      proxy: buildProxyConfig(),
-    };
-  }
-
   private async get(url: string, params?: Record<string, unknown>): Promise<unknown> {
-    const resp = await axios.get(API_BASE_URL + url, {
-      params,
-      ...this.requestConfig(),
+    const fullUrl = buildUrl(API_BASE_URL + url, params);
+    const session = await this.getSession();
+    const response = await session.fetch(fullUrl, {
+      headers: { Authorization: `Bearer ${this.authId}` },
     });
-    await this.checkRateLimit(resp.headers as Record<string, string>);
-    return resp.data as unknown;
+    await this.checkRateLimit(response.headers);
+    return response.json();
   }
 
   private async *getPaginated(
-    url: string,
+    path: string,
     params?: Record<string, unknown>,
     resume?: string,
   ): AsyncGenerator<unknown[]> {
-    let nextLink: string | null = API_BASE_URL + url;
-    if (resume) nextLink += `?max_id=${resume}`;
+    const initialParams: Record<string, unknown> = { ...params };
+    if (resume) initialParams.max_id = resume;
+
+    let nextLink: string | null = buildUrl(
+      API_BASE_URL + path,
+      Object.keys(initialParams).length > 0 ? initialParams : undefined,
+    );
 
     while (nextLink !== null) {
-      const resp = await axios.get(nextLink, {
-        params,
-        ...this.requestConfig(),
+      const session = await this.getSession();
+      const response = await session.fetch(nextLink, {
+        headers: { Authorization: `Bearer ${this.authId}` },
       });
 
       // Parse RFC 5988 Link header to find the `rel="next"` URL
-      const linkHeader: string = (resp.headers as Record<string, string>)['link'] ?? '';
+      const linkHeader = response.headers.get('link') ?? '';
       nextLink = null;
       for (const part of linkHeader.split(',')) {
         const [urlPart, relPart] = part.split(';');
@@ -208,8 +231,8 @@ export class Api {
         }
       }
 
-      yield resp.data as unknown[];
-      await this.checkRateLimit(resp.headers as Record<string, string>);
+      yield await response.json<unknown[]>();
+      await this.checkRateLimit(response.headers);
     }
   }
 
@@ -229,20 +252,25 @@ export class Api {
       scope: 'read',
     };
 
-    let resp: { data: Record<string, unknown>; status: number };
+    let response: Awaited<ReturnType<typeof wreqFetch>>;
     try {
-      resp = await axios.post(url, payload, {
-        proxy: buildProxyConfig(),
-        headers: { 'User-Agent': USER_AGENT },
-        // Do not throw on non-2xx so we can inspect status ourselves
-        validateStatus: () => true,
+      response = await wreqFetch(url, {
+        method: 'POST',
+        browser: BROWSER_PROFILE,
+        os: OS,
+        proxy: getProxyUrl(),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
     } catch (err) {
       throw new LoginErrorException(`Cannot authenticate: ${(err as Error).message}`);
     }
 
-    if (resp.status === 403) {
-      const text = String(resp.data ?? '').toLowerCase();
+    // Consume the body once as text so we can inspect it for error messages
+    const responseText = await response.text();
+
+    if (response.status === 403) {
+      const text = responseText.toLowerCase();
       if (text.includes('unavailable in your area')) {
         throw new GeoblockException('Truth Social is unavailable in your area.');
       }
@@ -250,11 +278,19 @@ export class Api {
         throw new CFBlockException('Request blocked by Cloudflare.');
       }
       throw new LoginErrorException(
-        `Authentication forbidden (403). Response: ${String(resp.data).slice(0, 200)}`,
+        `Authentication forbidden (403). Response: ${responseText.slice(0, 200)}`,
       );
     }
 
-    const data = resp.data as { access_token?: string };
+    let data: { access_token?: string };
+    try {
+      data = JSON.parse(responseText) as { access_token?: string };
+    } catch {
+      throw new LoginErrorException(
+        `Cannot parse authentication response: ${responseText.slice(0, 200)}`,
+      );
+    }
+
     if (!data.access_token) {
       throw new Error('Invalid truthsocial.com credentials provided!');
     }
