@@ -1,0 +1,35 @@
+{
+  "name": "truthbrush",
+  "version": "0.1.0",
+  "description": "TypeScript API client for Truth Social",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "truthbrush": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint 'src/**/*.ts' 'test/**/*.ts'"
+  },
+  "keywords": [
+    "truth-social",
+    "api",
+    "client",
+    "typescript"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.7",
+    "wreq-js": "^2.2.2"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.3.2",
+    "typescript": "^5.8.3"
+  }
+}
